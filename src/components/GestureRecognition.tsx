@@ -1,4 +1,3 @@
-
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { Hands, Results } from '@mediapipe/hands';
 import { Camera } from '@mediapipe/camera_utils';
@@ -23,66 +22,153 @@ const GestureRecognition: React.FC = () => {
   const [gestureHistory, setGestureHistory] = useState<GestureResult[]>([]);
   const [isActive, setIsActive] = useState(false);
 
-  // Gesture classification based on hand landmarks
+  // Enhanced gesture classification with more gestures
   const classifyGesture = useCallback((landmarks: any) => {
     if (!landmarks || landmarks.length === 0) return { gesture: 'none', confidence: 0 };
 
     try {
       const points = landmarks[0];
       
-      // Extract key landmark positions
+      // Extract all landmark positions
       const thumb_tip = points[4];
       const thumb_ip = points[3];
+      const thumb_mcp = points[2];
       const index_tip = points[8];
       const index_pip = points[6];
+      const index_mcp = points[5];
       const middle_tip = points[12];
       const middle_pip = points[10];
+      const middle_mcp = points[9];
       const ring_tip = points[16];
       const ring_pip = points[14];
+      const ring_mcp = points[13];
       const pinky_tip = points[20];
       const pinky_pip = points[18];
+      const pinky_mcp = points[17];
       const wrist = points[0];
 
-      // Helper function to check if finger is extended
-      const isFingerExtended = (tip: any, pip: any, wrist: any) => {
-        const tipToWrist = Math.sqrt(Math.pow(tip.x - wrist.x, 2) + Math.pow(tip.y - wrist.y, 2));
-        const pipToWrist = Math.sqrt(Math.pow(pip.x - wrist.x, 2) + Math.pow(pip.y - wrist.y, 2));
-        return tipToWrist > pipToWrist;
+      // Enhanced finger extension detection
+      const isFingerExtended = (tip: any, pip: any, mcp: any) => {
+        const tipToPip = Math.sqrt(Math.pow(tip.x - pip.x, 2) + Math.pow(tip.y - pip.y, 2));
+        const pipToMcp = Math.sqrt(Math.pow(pip.x - mcp.x, 2) + Math.pow(pip.y - mcp.y, 2));
+        const tipToMcp = Math.sqrt(Math.pow(tip.x - mcp.x, 2) + Math.pow(tip.y - mcp.y, 2));
+        return tipToMcp > (tipToPip + pipToMcp) * 0.8;
       };
 
-      const isThumbExtended = thumb_tip.x > thumb_ip.x; // Simplified thumb check
-      const isIndexExtended = isFingerExtended(index_tip, index_pip, wrist);
-      const isMiddleExtended = isFingerExtended(middle_tip, middle_pip, wrist);
-      const isRingExtended = isFingerExtended(ring_tip, ring_pip, wrist);
-      const isPinkyExtended = isFingerExtended(pinky_tip, pinky_pip, wrist);
+      // Thumb extension (different logic due to thumb orientation)
+      const isThumbExtended = () => {
+        const thumbLength = Math.sqrt(Math.pow(thumb_tip.x - thumb_mcp.x, 2) + Math.pow(thumb_tip.y - thumb_mcp.y, 2));
+        const baseLength = Math.sqrt(Math.pow(thumb_ip.x - thumb_mcp.x, 2) + Math.pow(thumb_ip.y - thumb_mcp.y, 2));
+        return thumbLength > baseLength * 1.2;
+      };
 
-      const extendedFingers = [
-        isThumbExtended,
-        isIndexExtended,
-        isMiddleExtended,
-        isRingExtended,
-        isPinkyExtended
-      ].filter(Boolean).length;
+      const isThumbUp = isThumbExtended();
+      const isIndexUp = isFingerExtended(index_tip, index_pip, index_mcp);
+      const isMiddleUp = isFingerExtended(middle_tip, middle_pip, middle_mcp);
+      const isRingUp = isFingerExtended(ring_tip, ring_pip, ring_mcp);
+      const isPinkyUp = isFingerExtended(pinky_tip, pinky_pip, pinky_mcp);
 
-      // Gesture classification logic
+      const extendedFingers = [isThumbUp, isIndexUp, isMiddleUp, isRingUp, isPinkyUp].filter(Boolean).length;
+
+      // Distance calculations for special gestures
+      const thumbIndexDistance = Math.sqrt(Math.pow(thumb_tip.x - index_tip.x, 2) + Math.pow(thumb_tip.y - index_tip.y, 2));
+      const thumbMiddleDistance = Math.sqrt(Math.pow(thumb_tip.x - middle_tip.x, 2) + Math.pow(thumb_tip.y - middle_tip.y, 2));
+
+      // Enhanced gesture classification
+      
+      // Fist - no fingers extended
       if (extendedFingers === 0) {
-        return { gesture: 'fist', confidence: 0.9 };
-      } else if (extendedFingers === 5) {
+        return { gesture: 'fist', confidence: 0.95 };
+      }
+      
+      // Open hand - all fingers extended
+      if (extendedFingers === 5) {
         return { gesture: 'open_hand', confidence: 0.95 };
-      } else if (isIndexExtended && isMiddleExtended && !isRingExtended && !isPinkyExtended) {
+      }
+      
+      // Thumbs up - only thumb extended
+      if (isThumbUp && !isIndexUp && !isMiddleUp && !isRingUp && !isPinkyUp) {
+        return { gesture: 'thumbs_up', confidence: 0.9 };
+      }
+      
+      // Thumbs down - thumb down, others closed (approximated)
+      if (!isThumbUp && !isIndexUp && !isMiddleUp && !isRingUp && !isPinkyUp && thumb_tip.y > thumb_mcp.y) {
+        return { gesture: 'thumbs_down', confidence: 0.85 };
+      }
+      
+      // Pointing - only index finger extended
+      if (!isThumbUp && isIndexUp && !isMiddleUp && !isRingUp && !isPinkyUp) {
+        return { gesture: 'pointing', confidence: 0.9 };
+      }
+      
+      // Peace sign - index and middle fingers extended
+      if (!isThumbUp && isIndexUp && isMiddleUp && !isRingUp && !isPinkyUp) {
         return { gesture: 'peace', confidence: 0.9 };
-      } else if (isThumbExtended && !isIndexExtended && !isMiddleExtended && !isRingExtended && !isPinkyExtended) {
-        return { gesture: 'thumbs_up', confidence: 0.85 };
-      } else if (isIndexExtended && !isMiddleExtended && !isRingExtended && !isPinkyExtended) {
-        return { gesture: 'pointing', confidence: 0.8 };
-      } else if (isThumbExtended && isIndexExtended && !isMiddleExtended && !isRingExtended && !isPinkyExtended) {
-        // Check for OK gesture (thumb and index forming circle)
-        const thumbIndexDistance = Math.sqrt(
-          Math.pow(thumb_tip.x - index_tip.x, 2) + Math.pow(thumb_tip.y - index_tip.y, 2)
-        );
-        if (thumbIndexDistance < 0.05) {
-          return { gesture: 'ok', confidence: 0.85 };
+      }
+      
+      // OK sign - thumb and index forming circle
+      if (isThumbUp && isIndexUp && !isMiddleUp && !isRingUp && !isPinkyUp && thumbIndexDistance < 0.06) {
+        return { gesture: 'ok', confidence: 0.9 };
+      }
+      
+      // Rock on / Devil horns - index and pinky extended
+      if (!isThumbUp && isIndexUp && !isMiddleUp && !isRingUp && isPinkyUp) {
+        return { gesture: 'rock_on', confidence: 0.9 };
+      }
+      
+      // Call me - thumb and pinky extended
+      if (isThumbUp && !isIndexUp && !isMiddleUp && !isRingUp && isPinkyUp) {
+        return { gesture: 'call_me', confidence: 0.85 };
+      }
+      
+      // Gun - index and thumb extended, others closed
+      if (isThumbUp && isIndexUp && !isMiddleUp && !isRingUp && !isPinkyUp && thumbIndexDistance > 0.08) {
+        return { gesture: 'gun', confidence: 0.8 };
+      }
+      
+      // Spock (Vulcan salute) - index+middle separated from ring+pinky
+      if (!isThumbUp && isIndexUp && isMiddleUp && isRingUp && isPinkyUp) {
+        const indexMiddleGap = Math.sqrt(Math.pow(index_tip.x - middle_tip.x, 2) + Math.pow(index_tip.y - middle_tip.y, 2));
+        const middleRingGap = Math.sqrt(Math.pow(middle_tip.x - ring_tip.x, 2) + Math.pow(middle_tip.y - ring_tip.y, 2));
+        const ringPinkyGap = Math.sqrt(Math.pow(ring_tip.x - pinky_tip.x, 2) + Math.pow(ring_tip.y - pinky_tip.y, 2));
+        
+        if (middleRingGap > indexMiddleGap && middleRingGap > ringPinkyGap) {
+          return { gesture: 'spock', confidence: 0.85 };
         }
+      }
+      
+      // L-shape - thumb and index at 90 degrees
+      if (isThumbUp && isIndexUp && !isMiddleUp && !isRingUp && !isPinkyUp) {
+        const thumbVector = { x: thumb_tip.x - thumb_mcp.x, y: thumb_tip.y - thumb_mcp.y };
+        const indexVector = { x: index_tip.x - index_mcp.x, y: index_tip.y - index_mcp.y };
+        const dotProduct = thumbVector.x * indexVector.x + thumbVector.y * indexVector.y;
+        const thumbMag = Math.sqrt(thumbVector.x * thumbVector.x + thumbVector.y * thumbVector.y);
+        const indexMag = Math.sqrt(indexVector.x * indexVector.x + indexVector.y * indexVector.y);
+        const angle = Math.acos(dotProduct / (thumbMag * indexMag)) * 180 / Math.PI;
+        
+        if (angle > 70 && angle < 110) {
+          return { gesture: 'l_shape', confidence: 0.8 };
+        }
+      }
+      
+      // Three - thumb, index, middle extended
+      if (isThumbUp && isIndexUp && isMiddleUp && !isRingUp && !isPinkyUp) {
+        return { gesture: 'three', confidence: 0.85 };
+      }
+      
+      // Four - index, middle, ring, pinky extended
+      if (!isThumbUp && isIndexUp && isMiddleUp && isRingUp && isPinkyUp) {
+        return { gesture: 'four', confidence: 0.85 };
+      }
+      
+      // One - only index extended (alternative)
+      if (!isThumbUp && isIndexUp && !isMiddleUp && !isRingUp && !isPinkyUp) {
+        return { gesture: 'one', confidence: 0.8 };
+      }
+      
+      // Two - index and middle extended (alternative)
+      if (!isThumbUp && isIndexUp && isMiddleUp && !isRingUp && !isPinkyUp) {
+        return { gesture: 'two', confidence: 0.8 };
       }
 
       return { gesture: 'unknown', confidence: 0.6 };
@@ -185,10 +271,20 @@ const GestureRecognition: React.FC = () => {
     const emojiMap: Record<string, string> = {
       'peace': '✌️',
       'thumbs_up': '👍',
+      'thumbs_down': '👎',
       'ok': '👌',
       'pointing': '👉',
       'fist': '✊',
       'open_hand': '✋',
+      'rock_on': '🤘',
+      'call_me': '🤙',
+      'gun': '👉',
+      'spock': '🖖',
+      'l_shape': '🤟',
+      'three': '3️⃣',
+      'four': '4️⃣',
+      'one': '1️⃣',
+      'two': '2️⃣',
       'none': '❓',
       'unknown': '🤔'
     };
@@ -199,10 +295,20 @@ const GestureRecognition: React.FC = () => {
     const labelMap: Record<string, string> = {
       'peace': 'Peace Sign',
       'thumbs_up': 'Thumbs Up',
+      'thumbs_down': 'Thumbs Down',
       'ok': 'OK Sign',
       'pointing': 'Pointing',
       'fist': 'Fist',
       'open_hand': 'Open Hand',
+      'rock_on': 'Rock On',
+      'call_me': 'Call Me',
+      'gun': 'Gun Gesture',
+      'spock': 'Vulcan Salute',
+      'l_shape': 'L-Shape',
+      'three': 'Number Three',
+      'four': 'Number Four',
+      'one': 'Number One',
+      'two': 'Number Two',
       'none': 'No Hand Detected',
       'unknown': 'Unknown Gesture'
     };
@@ -218,7 +324,7 @@ const GestureRecognition: React.FC = () => {
             Gesture Flow Sensei
           </h1>
           <p className="text-muted-foreground text-lg">
-            Advanced Hand Gesture Recognition System
+            Advanced Hand Gesture Recognition System - Now with 15+ Gestures!
           </p>
         </div>
 
@@ -318,19 +424,28 @@ const GestureRecognition: React.FC = () => {
 
             {/* Supported Gestures */}
             <Card className="p-6">
-              <h3 className="text-lg font-semibold mb-4">Supported Gestures</h3>
-              <div className="grid grid-cols-2 gap-2 text-sm">
+              <h3 className="text-lg font-semibold mb-4">Supported Gestures (15+)</h3>
+              <div className="grid grid-cols-2 gap-2 text-sm max-h-64 overflow-y-auto">
                 {[
                   { emoji: '✌️', name: 'Peace' },
                   { emoji: '👍', name: 'Thumbs Up' },
+                  { emoji: '👎', name: 'Thumbs Down' },
                   { emoji: '👌', name: 'OK Sign' },
                   { emoji: '👉', name: 'Pointing' },
                   { emoji: '✊', name: 'Fist' },
-                  { emoji: '✋', name: 'Open Hand' }
+                  { emoji: '✋', name: 'Open Hand' },
+                  { emoji: '🤘', name: 'Rock On' },
+                  { emoji: '🤙', name: 'Call Me' },
+                  { emoji: '🖖', name: 'Vulcan Salute' },
+                  { emoji: '🤟', name: 'L-Shape' },
+                  { emoji: '1️⃣', name: 'One' },
+                  { emoji: '2️⃣', name: 'Two' },
+                  { emoji: '3️⃣', name: 'Three' },
+                  { emoji: '4️⃣', name: 'Four' }
                 ].map((gesture, index) => (
                   <div key={index} className="flex items-center gap-2 p-2 bg-secondary/30 rounded">
                     <span>{gesture.emoji}</span>
-                    <span>{gesture.name}</span>
+                    <span className="text-xs">{gesture.name}</span>
                   </div>
                 ))}
               </div>
